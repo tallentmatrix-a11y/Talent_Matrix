@@ -1,1 +1,4 @@
-@import 'tailwindcss';
+@import "tailwindcss";
+
+/* This forces the dark variant to look for the class instead of system settings */
+@variant dark (&:where(.dark, .dark *));
