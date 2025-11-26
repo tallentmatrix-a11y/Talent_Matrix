@@ -1,7 +1,8 @@
 import React, { useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
-import { logout, updateLocalPhoto } from '../redux/userSlice';
+// Import the new uploadProfileImage thunk
+import { logout, uploadProfileImage } from '../redux/userSlice';
 
 const Sidebar = () => {
   const navigate = useNavigate();
@@ -17,12 +18,19 @@ const Sidebar = () => {
     navigate('/login');
   };
 
-  const handlePhotoUpload = (e) => {
+  const handlePhotoUpload = async (e) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = () => dispatch(updateLocalPhoto(reader.result));
-      reader.readAsDataURL(file);
+    
+    // Ensure we have a file and a valid user ID before attempting upload
+    if (file && user.id) {
+      try {
+        // Dispatch the asynchronous upload action
+        await dispatch(uploadProfileImage({ userId: user.id, file })).unwrap();
+        // The Redux state will automatically update with the new photo URL upon success
+      } catch (error) {
+        console.error("Failed to upload profile photo:", error);
+        alert("Failed to upload photo. Please try again.");
+      }
     }
   };
 
@@ -38,15 +46,26 @@ const Sidebar = () => {
   ];
 
   return (
-    <aside className="w-[255px] bg-gradient-to-b from-[#1e3a8a] to-[#1f40af] text-white p-6 flex flex-col items-center">
+    <aside className="w-[255px] bg-gradient-to-b from-[#1e3a8a] to-[#1f40af] text-white p-6 flex flex-col items-center h-screen sticky top-0">
       <div className="text-center mb-6 w-full">
-        <div className="w-[120px] h-[120px] rounded-full overflow-hidden border-4 border-white mx-auto mb-3 bg-white">
+        <div className="w-[120px] h-[120px] rounded-full overflow-hidden border-4 border-white mx-auto mb-3 bg-white relative group">
           <img
+            // Use photoDataUrl from Redux (which holds the Supabase URL)
             src={user.photoDataUrl || 'https://via.placeholder.com/120'}
             alt="Profile"
             className="w-full h-full object-cover"
           />
+          
+          {/* Optional: Hover overlay to indicate clickable */}
+          <div 
+            onClick={() => profileUploadRef.current?.click()}
+            className="absolute inset-0 bg-black/30 hidden group-hover:flex items-center justify-center cursor-pointer transition-all"
+          >
+            <span className="text-xs text-white font-bold">Edit</span>
+          </div>
         </div>
+
+        {/* Hidden File Input */}
         <input
           type="file"
           ref={profileUploadRef}
@@ -54,23 +73,19 @@ const Sidebar = () => {
           className="hidden"
           onChange={handlePhotoUpload}
         />
+
         <button
           onClick={() => profileUploadRef.current?.click()}
           className="mt-2 text-xs bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 rounded-md font-medium"
         >
           Change Photo
         </button>
-        <div className="font-bold text-base mt-3">{user.name}</div>
-        <div className="text-sm opacity-90 mt-1">{user.email}</div>
+
+        <div className="font-bold text-base mt-3">{user.name || "User"}</div>
+        <div className="text-sm opacity-90 mt-1 break-words">{user.email}</div>
       </div>
 
-      <input
-        type="text"
-        placeholder="Search..."
-        className="w-full px-3 py-2 rounded-md bg-white/90 text-gray-800 placeholder-gray-500 outline-none mb-4"
-      />
-
-      <nav className="w-full flex flex-col gap-2 mb-auto">
+      <nav className="w-full flex flex-col gap-2 mb-auto overflow-y-auto custom-scrollbar">
         {navItems.map((section) => (
           <button
             key={section}

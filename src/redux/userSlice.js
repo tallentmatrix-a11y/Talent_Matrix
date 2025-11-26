@@ -1,6 +1,7 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 
-const API_BASE = "https://talentmatrix-backend.onrender.com"; // Ensure this matches your backend's running port
+// Ensure this matches your backend's running port
+const API_BASE = "https://talentmatrix-backend.onrender.com"; 
 
 // --- ASYNCHRONOUS THUNKS (API Interactions) ---
 
@@ -30,7 +31,7 @@ export const fetchUserData = createAsyncThunk('user/fetchData', async (userId) =
         name: data.full_name,
         email: data.email,
         rollNumber: data.roll_number || '',
-        photoDataUrl: data.profile_image_url || '',
+        photoDataUrl: data.profile_image_url || '', // Maps backend URL to frontend state
         resumeRemoteUrl: data.resume_url || '',
         semesters,
         mobileNumber: data.mobile_number || '',
@@ -43,7 +44,7 @@ export const fetchUserData = createAsyncThunk('user/fetchData', async (userId) =
         skills: [],
         appliedJobs: [],
         manualProjects,
-        leetcodeStats: null, // Initialize
+        leetcodeStats: null,
         codingStats: {}
     };
 });
@@ -69,17 +70,17 @@ export const fetchGithubRepos = createAsyncThunk('user/fetchGithub', async (user
 // 3. Fetch LeetCode Stats
 export const fetchLeetCodeStats = createAsyncThunk('user/fetchLeetCode', async (username) => {
     if (!username) return null;
-    // NOTE: Ensure your express app is mounting the route at /api/leetcode
     const res = await fetch(`${API_BASE}/api/leetcode/${username}`);
     if (!res.ok) throw new Error("LeetCode User not found");
     const data = await res.json();
-    return data; // Returns { total, easy, medium, hard, topics }
+    return data; 
 });
 
-// 4. Update Profile
+// 4. Update Profile (Text Data)
 export const updateUserProfile = createAsyncThunk('user/update', async ({ userId, data }) => {
     const payload = {};
     for (const key in data) {
+        // Convert camelCase keys to snake_case for DB
         const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
         payload[snakeKey] = data[key];
     }
@@ -94,7 +95,7 @@ export const updateUserProfile = createAsyncThunk('user/update', async ({ userId
     return data;
 });
 
-// 5. Upload Resume
+// 5. Upload Resume (File)
 export const uploadResumeFile = createAsyncThunk('user/uploadResume', async ({ userId, file }) => {
     const formData = new FormData();
     formData.append('resume', file);
@@ -104,11 +105,22 @@ export const uploadResumeFile = createAsyncThunk('user/uploadResume', async ({ u
     return data.resumeUrl || data.resume_url;
 });
 
-// 6. Save Applied Job to Database
-/**
- * Saves a job record to the backend /api/applied-jobs endpoint.
- * Requires: jobData must include student_id as a valid UUID string.
- */
+// 6. Upload Profile Image (File) - NEW FEATURE
+export const uploadProfileImage = createAsyncThunk('user/uploadProfileImage', async ({ userId, file }) => {
+    const formData = new FormData();
+    formData.append('profileImage', file); // Must match backend: upload.single('profileImage')
+    
+    const res = await fetch(`${API_BASE}/api/signup/${userId}/profile-image`, { 
+        method: 'PUT', 
+        body: formData 
+    });
+    
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to upload image");
+    return data.imageUrl; // Backend returns { imageUrl: "..." }
+});
+
+// 7. Save Applied Job
 export const saveJob = createAsyncThunk('user/saveJob', async (jobData, { rejectWithValue }) => {
     try {
         const response = await fetch(`${API_BASE}/api/applied-jobs`, {
@@ -119,11 +131,8 @@ export const saveJob = createAsyncThunk('user/saveJob', async (jobData, { reject
 
         if (!response.ok) {
             const errorData = await response.json();
-            // This error payload will be caught by the frontend component
             return rejectWithValue(errorData.error || `Failed to save job with status: ${response.status}`);
         }
-
-        // Return the jobData on success to update the local state
         return jobData;
     } catch (error) {
         return rejectWithValue(error.message || "Network error: Could not save job.");
@@ -145,7 +154,7 @@ const userSlice = createSlice({
         status: 'idle',
         githubStatus: 'idle',
         leetcodeStatus: 'idle',
-        saveJobStatus: 'idle', // Tracks the status of the saveJob thunk
+        saveJobStatus: 'idle',
         error: null
     },
     reducers: {
@@ -164,7 +173,6 @@ const userSlice = createSlice({
         updateLocalPhoto: (state, action) => {
             state.data.photoDataUrl = action.payload;
         },
-        // This reducer adds the job to the local state after successful API save
         addAppliedJob: (state, action) => {
             const isDuplicate = state.data.appliedJobs.some(job => job.job_url === action.payload.job_url);
             if (!isDuplicate) {
@@ -184,12 +192,13 @@ const userSlice = createSlice({
     },
     extraReducers: (builder) => {
         builder
+            // 1. Fetch User Data
             .addCase(fetchUserData.fulfilled, (state, action) => {
                 state.status = 'succeeded';
                 state.data = { ...state.data, ...action.payload };
             })
 
-            // GitHub Handlers
+            // 2. Fetch GitHub
             .addCase(fetchGithubRepos.pending, (state) => { state.githubStatus = 'loading'; })
             .addCase(fetchGithubRepos.fulfilled, (state, action) => {
                 state.githubStatus = 'succeeded';
@@ -197,7 +206,7 @@ const userSlice = createSlice({
             })
             .addCase(fetchGithubRepos.rejected, (state) => { state.githubStatus = 'failed'; })
 
-            // LeetCode Handlers
+            // 3. Fetch LeetCode
             .addCase(fetchLeetCodeStats.pending, (state) => { state.leetcodeStatus = 'loading'; })
             .addCase(fetchLeetCodeStats.fulfilled, (state, action) => {
                 state.leetcodeStatus = 'succeeded';
@@ -205,23 +214,29 @@ const userSlice = createSlice({
             })
             .addCase(fetchLeetCodeStats.rejected, (state) => { state.leetcodeStatus = 'failed'; })
 
-            // Update Profile Handlers
+            // 4. Update Profile
             .addCase(updateUserProfile.fulfilled, (state, action) => {
                 state.data = { ...state.data, ...action.payload };
             })
-            // Upload Resume Handlers
+
+            // 5. Upload Resume
             .addCase(uploadResumeFile.fulfilled, (state, action) => {
                 state.data.resumeRemoteUrl = action.payload;
             })
 
-            // Save Job Handlers
+            // 6. Upload Profile Image (Handle Success)
+            .addCase(uploadProfileImage.fulfilled, (state, action) => {
+                // Update the photo URL in the store immediately after upload
+                state.data.photoDataUrl = action.payload;
+            })
+
+            // 7. Save Job
             .addCase(saveJob.pending, (state) => {
                 state.saveJobStatus = 'loading';
                 state.error = null;
             })
             .addCase(saveJob.fulfilled, (state, action) => {
                 state.saveJobStatus = 'succeeded';
-                // Add the job to the local appliedJobs array
                 const isDuplicate = state.data.appliedJobs.some(job => job.job_url === action.payload.job_url);
                 if (!isDuplicate) {
                     state.data.appliedJobs.push(action.payload);
@@ -229,7 +244,6 @@ const userSlice = createSlice({
             })
             .addCase(saveJob.rejected, (state, action) => {
                 state.saveJobStatus = 'failed';
-                // action.payload contains the error message (e.g., "Job already saved...")
                 state.error = action.payload || "Failed to save job.";
             });
     }
@@ -244,7 +258,6 @@ export const {
     addManualProject,
     removeManualProject,
     updateSemester
-}
- = userSlice.actions;
+} = userSlice.actions;
 
 export default userSlice.reducer;
