@@ -1,18 +1,16 @@
+// src/redux/userSlice.js
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 
 const API_BASE = "https://talentmatrix-backend.onrender.com";
 
 async function parseJsonSafe(res) {
-  try {
-    return await res.json();
-  } catch {
-    return null;
-  }
+  try { return await res.json(); }
+  catch { return null; }
 }
 
 /* ===================== THUNKS ===================== */
 
-/** Fetch complete user profile (profile + semesters + skills + manual projects) */
+/** Fetch user profile + semesters + skills + manual projects */
 export const fetchUserData = createAsyncThunk(
   'user/fetchUserData',
   async (userId, { rejectWithValue }) => {
@@ -35,7 +33,7 @@ export const fetchUserData = createAsyncThunk(
       try {
         const sres = await fetch(`${API_BASE}/api/signup/${userId}/skills`);
         if (sres.ok) skills = await sres.json();
-      } catch (e) {}
+      } catch (e) { /* ignore */ }
 
       let manualProjects = [];
       try {
@@ -44,7 +42,7 @@ export const fetchUserData = createAsyncThunk(
           const projData = await pres.json();
           manualProjects = projData.map(p => ({ ...p, source: 'manual' }));
         }
-      } catch (e) {}
+      } catch (e) { /* ignore */ }
 
       return {
         id: data.id,
@@ -78,19 +76,11 @@ export const addSkillToBackend = createAsyncThunk(
   'user/addSkillToBackend',
   async (skillData, { rejectWithValue }) => {
     try {
-      const payload = {
-        studentId: skillData.student_id ?? skillData.studentId,
-        skillName: skillData.skill_name ?? skillData.skillName ?? skillData.name,
-        proficiency: skillData.proficiency ?? skillData.level ?? 'Beginner',
-        tags: skillData.tags ?? ''
-      };
-
       const res = await fetch(`${API_BASE}/api/signup/skills`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(skillData)
       });
-
       if (!res.ok) {
         const err = await parseJsonSafe(res);
         return rejectWithValue(err?.error || `Failed to save skill (${res.status})`);
@@ -125,20 +115,11 @@ export const addProjectToBackend = createAsyncThunk(
   'user/addProjectToBackend',
   async (projectData, { rejectWithValue }) => {
     try {
-      const payload = {
-        studentId: projectData.student_id ?? projectData.studentId,
-        title: projectData.title ?? projectData.name ?? '',
-        description: projectData.description ?? projectData.desc ?? '',
-        projectLink: projectData.link ?? projectData.projectLink ?? '',
-        tags: projectData.tags ?? ''
-      };
-
       const res = await fetch(`${API_BASE}/api/projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(projectData)
       });
-
       if (!res.ok) {
         const err = await parseJsonSafe(res);
         return rejectWithValue(err?.error || `Failed to add project (${res.status})`);
@@ -168,7 +149,37 @@ export const deleteProjectFromBackend = createAsyncThunk(
   }
 );
 
-/** Upload resume */
+/** Update user profile (name, links, mobile, etc.) */
+export const updateUserProfile = createAsyncThunk(
+  'user/updateUserProfile',
+  async ({ userId, data }, { rejectWithValue }) => {
+    try {
+      const payload = {};
+      for (const key in data) {
+        const snake = key.replace(/[A-Z]/g, m => `_${m.toLowerCase()}`);
+        payload[snake] = data[key];
+      }
+
+      const res = await fetch(`${API_BASE}/api/signup/${userId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const err = await parseJsonSafe(res);
+        return rejectWithValue(err?.error || `Update failed (${res.status})`);
+      }
+
+      // We return the original camelCase data so reducer can merge.
+      return data;
+    } catch (err) {
+      return rejectWithValue(err.message);
+    }
+  }
+);
+
+/** Upload resume (PUT) */
 export const uploadResumeFile = createAsyncThunk(
   'user/uploadResumeFile',
   async ({ userId, file }, { rejectWithValue }) => {
@@ -176,12 +187,9 @@ export const uploadResumeFile = createAsyncThunk(
       const fd = new FormData();
       fd.append('resume', file);
       const res = await fetch(`${API_BASE}/api/signup/${userId}/resume`, { method: 'PUT', body: fd });
-      if (!res.ok) {
-        const err = await parseJsonSafe(res);
-        return rejectWithValue(err?.error || `Failed to upload resume (${res.status})`);
-      }
-      const data = await res.json();
-      return data.resumeUrl ?? data.resume_url ?? null;
+      const data = await parseJsonSafe(res);
+      if (!res.ok) return rejectWithValue(data?.error || `Upload failed (${res?.status})`);
+      return data?.resumeUrl || data?.resume_url || null;
     } catch (err) {
       return rejectWithValue(err.message);
     }
@@ -196,19 +204,16 @@ export const uploadProfileImage = createAsyncThunk(
       const fd = new FormData();
       fd.append('profileImage', file);
       const res = await fetch(`${API_BASE}/api/signup/${userId}/profile-image`, { method: 'PUT', body: fd });
-      if (!res.ok) {
-        const err = await parseJsonSafe(res);
-        return rejectWithValue(err?.error || `Failed to upload image (${res.status})`);
-      }
-      const data = await res.json();
-      return data.imageUrl ?? data.profile_image_url ?? null;
+      const data = await parseJsonSafe(res);
+      if (!res.ok) return rejectWithValue(data?.error || `Upload failed (${res?.status})`);
+      return data?.imageUrl || data?.profile_image_url || null;
     } catch (err) {
       return rejectWithValue(err.message);
     }
   }
 );
 
-/** Save job */
+/** Save applied job */
 export const saveJob = createAsyncThunk(
   'user/saveJob',
   async (jobData, { rejectWithValue }) => {
@@ -229,7 +234,7 @@ export const saveJob = createAsyncThunk(
   }
 );
 
-/** Fetch GitHub repos */
+/** GitHub fetch */
 export const fetchGithubRepos = createAsyncThunk(
   'user/fetchGithubRepos',
   async (username, { rejectWithValue }) => {
@@ -243,9 +248,9 @@ export const fetchGithubRepos = createAsyncThunk(
         .map(r => ({
           id: r.id,
           title: r.name,
-          description: r.description ?? '',
+          description: r.description || '',
           link: r.html_url,
-          tags: r.language ?? '',
+          tags: r.language || '',
           source: 'github'
         }));
     } catch (err) {
@@ -254,20 +259,18 @@ export const fetchGithubRepos = createAsyncThunk(
   }
 );
 
-/** Fetch LeetCode stats */
+/** LeetCode fetch (backend endpoint) */
 export const fetchLeetCodeStats = createAsyncThunk(
   'user/fetchLeetCodeStats',
   async (usernameOrUrl, { rejectWithValue }) => {
     try {
       if (!usernameOrUrl) return null;
       let username = usernameOrUrl;
-      if (typeof username === 'string' && username.includes('leetcode.com')) {
-        username = username.replace(/\/+$/, '');
-        username = username.split('/').pop();
+      if (username.includes('leetcode.com')) {
+        username = username.replace(/\/+$/, '').split('/').pop();
       }
       username = (username || '').trim();
       if (!username) return null;
-
       const res = await fetch(`${API_BASE}/api/leetcode/${username}`);
       if (!res.ok) {
         const err = await parseJsonSafe(res);
@@ -344,47 +347,52 @@ const userSlice = createSlice({
   },
   extraReducers: builder => {
     builder
-      // fetchUserData
-      .addCase(fetchUserData.pending, (state) => { state.status = 'loading'; state.error = null; })
+      // fetch user
+      .addCase(fetchUserData.pending, state => { state.status = 'loading'; state.error = null; })
       .addCase(fetchUserData.fulfilled, (state, action) => { state.status = 'succeeded'; state.data = { ...state.data, ...action.payload }; })
       .addCase(fetchUserData.rejected, (state, action) => { state.status = 'failed'; state.error = action.payload || action.error?.message; })
 
-      // addSkillToBackend
-      .addCase(addSkillToBackend.pending, (state) => { state.skillStatus = 'loading'; state.error = null; })
-      .addCase(addSkillToBackend.fulfilled, (state, action) => { state.skillStatus = 'succeeded'; if (!state.data.skills) state.data.skills = []; state.data.skills.push(action.payload); })
+      // add skill
+      .addCase(addSkillToBackend.pending, state => { state.skillStatus = 'loading'; state.error = null; })
+      .addCase(addSkillToBackend.fulfilled, (state, action) => { state.skillStatus = 'succeeded'; state.data.skills = state.data.skills || []; state.data.skills.push(action.payload); })
       .addCase(addSkillToBackend.rejected, (state, action) => { state.skillStatus = 'failed'; state.error = action.payload || action.error?.message; })
 
-      // deleteSkillBackend
-      .addCase(deleteSkillBackend.pending, (state) => { state.skillStatus = 'loading'; })
-      .addCase(deleteSkillBackend.fulfilled, (state, action) => { state.skillStatus = 'succeeded'; state.data.skills = state.data.skills.filter(s => s.id !== action.payload); })
+      // delete skill
+      .addCase(deleteSkillBackend.pending, state => { state.skillStatus = 'loading'; })
+      .addCase(deleteSkillBackend.fulfilled, (state, action) => { state.skillStatus = 'succeeded'; state.data.skills = (state.data.skills || []).filter(s => s.id !== action.payload); })
       .addCase(deleteSkillBackend.rejected, (state, action) => { state.skillStatus = 'failed'; state.error = action.payload || action.error?.message; })
 
-      // addProjectToBackend
-      .addCase(addProjectToBackend.pending, (state) => { state.projectStatus = 'loading'; })
-      .addCase(addProjectToBackend.fulfilled, (state, action) => { state.projectStatus = 'succeeded'; if (!state.data.manualProjects) state.data.manualProjects = []; state.data.manualProjects.unshift(action.payload); })
+      // add project
+      .addCase(addProjectToBackend.pending, state => { state.projectStatus = 'loading'; })
+      .addCase(addProjectToBackend.fulfilled, (state, action) => { state.projectStatus = 'succeeded'; state.data.manualProjects = state.data.manualProjects || []; state.data.manualProjects.unshift(action.payload); })
       .addCase(addProjectToBackend.rejected, (state, action) => { state.projectStatus = 'failed'; state.error = action.payload || action.error?.message; })
 
-      // deleteProjectFromBackend
-      .addCase(deleteProjectFromBackend.pending, (state) => { state.projectStatus = 'loading'; })
-      .addCase(deleteProjectFromBackend.fulfilled, (state, action) => { state.projectStatus = 'succeeded'; state.data.manualProjects = state.data.manualProjects.filter(p => p.id !== action.payload); })
+      // delete project
+      .addCase(deleteProjectFromBackend.pending, state => { state.projectStatus = 'loading'; })
+      .addCase(deleteProjectFromBackend.fulfilled, (state, action) => { state.projectStatus = 'succeeded'; state.data.manualProjects = (state.data.manualProjects || []).filter(p => p.id !== action.payload); })
       .addCase(deleteProjectFromBackend.rejected, (state, action) => { state.projectStatus = 'failed'; state.error = action.payload || action.error?.message; })
+
+      // update profile
+      .addCase(updateUserProfile.pending, state => { state.status = 'loading'; state.error = null; })
+      .addCase(updateUserProfile.fulfilled, (state, action) => { state.status = 'succeeded'; state.data = { ...state.data, ...action.payload }; })
+      .addCase(updateUserProfile.rejected, (state, action) => { state.status = 'failed'; state.error = action.payload || action.error?.message; })
 
       // uploads
       .addCase(uploadResumeFile.fulfilled, (state, action) => { state.data.resumeRemoteUrl = action.payload; })
       .addCase(uploadProfileImage.fulfilled, (state, action) => { state.data.photoDataUrl = action.payload; })
 
-      // saveJob
-      .addCase(saveJob.pending, (state) => { state.saveJobStatus = 'loading'; })
-      .addCase(saveJob.fulfilled, (state, action) => { state.saveJobStatus = 'succeeded'; const exists = state.data.appliedJobs.some(j => j.job_url === action.payload.job_url); if (!exists) state.data.appliedJobs.push(action.payload); })
+      // save job
+      .addCase(saveJob.pending, state => { state.saveJobStatus = 'loading'; })
+      .addCase(saveJob.fulfilled, (state, action) => { state.saveJobStatus = 'succeeded'; const exists = (state.data.appliedJobs || []).some(j => j.job_url === action.payload.job_url); if (!exists) state.data.appliedJobs.push(action.payload); })
       .addCase(saveJob.rejected, (state, action) => { state.saveJobStatus = 'failed'; state.error = action.payload || action.error?.message; })
 
       // github
-      .addCase(fetchGithubRepos.pending, (state) => { state.githubStatus = 'loading'; })
+      .addCase(fetchGithubRepos.pending, state => { state.githubStatus = 'loading'; })
       .addCase(fetchGithubRepos.fulfilled, (state, action) => { state.githubStatus = 'succeeded'; state.data.githubProjects = action.payload; })
       .addCase(fetchGithubRepos.rejected, (state, action) => { state.githubStatus = 'failed'; state.error = action.payload || action.error?.message; })
 
       // leetcode
-      .addCase(fetchLeetCodeStats.pending, (state) => { state.leetcodeStatus = 'loading'; })
+      .addCase(fetchLeetCodeStats.pending, state => { state.leetcodeStatus = 'loading'; })
       .addCase(fetchLeetCodeStats.fulfilled, (state, action) => { state.leetcodeStatus = 'succeeded'; state.data.leetcodeStats = action.payload; })
       .addCase(fetchLeetCodeStats.rejected, (state, action) => { state.leetcodeStatus = 'failed'; state.error = action.payload || action.error?.message; });
   }
@@ -392,7 +400,6 @@ const userSlice = createSlice({
 
 /* ===================== EXPORTS ===================== */
 
-// Sync actions
 export const {
   logout,
   addSkill,
@@ -401,5 +408,4 @@ export const {
   addAppliedJobLocal
 } = userSlice.actions;
 
-// default reducer
 export default userSlice.reducer;
