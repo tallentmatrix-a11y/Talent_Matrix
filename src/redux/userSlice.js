@@ -1,22 +1,36 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 
-// Ensure this matches your backend's running port
-const API_BASE = "https://talentmatrix-backend.onrender.com"; 
+// Ensure this matches your backend URL (no trailing slash)
+const API_BASE = "https://talentmatrix-backend.onrender.com";
 
-// --- ASYNCHRONOUS THUNKS (API Interactions) ---
+// ==========================================
+//  ASYNCHRONOUS THUNKS (API Interactions)
+// ==========================================
 
-// 1. Fetch Basic User Data
+// 1. Fetch User Data (Profile + Skills + Projects + Semesters)
 export const fetchUserData = createAsyncThunk('user/fetchData', async (userId) => {
+    // A. Fetch Basic Profile
     const res = await fetch(`${API_BASE}/api/signup/${userId}`);
     if (!res.ok) throw new Error('Failed to fetch user');
     const data = await res.json();
 
+    // B. Parse Semesters from columns (gpa_sem_1, etc.)
     const semesters = {};
-    for(let i=1; i<=8; i++) {
-        if(data[`gpa_sem_${i}`]) semesters[`Semester ${i}`] = data[`gpa_sem_${i}`];
+    for (let i = 1; i <= 8; i++) {
+        if (data[`gpa_sem_${i}`]) semesters[`Semester ${i}`] = data[`gpa_sem_${i}`];
     }
 
-    // Fetch Manual Projects
+    // C. Fetch Skills from DB
+    // We use the specific route from Code One to ensure we get the full skill objects (ids, etc.)
+    let skills = [];
+    try {
+        const skillRes = await fetch(`${API_BASE}/api/signup/${userId}/skills`);
+        if (skillRes.ok) {
+            skills = await skillRes.json();
+        }
+    } catch (e) { console.error("Skills fetch error", e); }
+
+    // D. Fetch Manual Projects
     let manualProjects = [];
     try {
         const projRes = await fetch(`${API_BASE}/api/projects/${userId}`);
@@ -24,31 +38,15 @@ export const fetchUserData = createAsyncThunk('user/fetchData', async (userId) =
             const projData = await projRes.json();
             manualProjects = projData.map(p => ({ ...p, source: 'manual' }));
         }
-    } catch (e) { console.error(e); }
+    } catch (e) { console.warn("Projects fetch skipped or failed"); }
 
-    // Fetch Skills (Assuming backend returns them, or initialize empty)
-    // If your backend endpoint for user data includes skills, map them here.
-    // Otherwise, we default to empty array or fetch them separately if needed.
-    // Based on previous context, we'll assume they might be separate or included.
-    // For now, initializing as empty array or using what's in data.
-    
-    // Note: You might need a separate fetch for skills if /signup/:id doesn't return them.
-    // For this example, let's assume we need to fetch them or they are part of data.
-    // If you need a separate fetch, let me know. I'll initialize it here.
-    let skills = [];
-    try {
-         const skillRes = await fetch(`${API_BASE}/api/skills/${userId}`);
-         if(skillRes.ok) {
-             skills = await skillRes.json();
-         }
-    } catch (e) { console.error("Skills fetch warning", e); }
-
+    // Return combined data structure
     return {
         id: data.id,
         name: data.full_name,
         email: data.email,
         rollNumber: data.roll_number || '',
-        photoDataUrl: data.profile_image_url || '', 
+        photoDataUrl: data.profile_image_url || '',
         resumeRemoteUrl: data.resume_url || '',
         semesters,
         mobileNumber: data.mobile_number || '',
@@ -58,43 +56,56 @@ export const fetchUserData = createAsyncThunk('user/fetchData', async (userId) =
         hackerrankUrl: data.hackerrank_url || '',
         codechefUrl: data.codechef_url || '',
         codeforcesUrl: data.codeforces_url || '',
-        skills: skills, // Populated from backend
+        skills: skills,
         appliedJobs: [],
         manualProjects,
         leetcodeStats: null,
-        codingStats: {}
+        codingStats: {} // Placeholder from Code Two
     };
 });
 
-// 2. Fetch GitHub Repos
-export const fetchGithubRepos = createAsyncThunk('user/fetchGithub', async (username) => {
-    if (!username) return [];
-    const res = await fetch(`https://api.github.com/users/${username}/repos?sort=updated&per_page=5`);
-    if (!res.ok) throw new Error("GitHub User not found");
-    const repos = await res.json();
-    return repos
-        .filter((repo) => typeof repo.description === 'string' && repo.description.trim().length > 0)
-        .map((repo) => ({
-            source: 'github',
-            id: repo.id,
-            title: repo.name,
-            link: repo.html_url,
-            description: repo.description.trim(),
-            tags: repo.language || "Code",
-        }));
+// 2. Add Skill to Backend
+export const addSkillToBackend = createAsyncThunk('user/addSkillToBackend', async (skillData, { rejectWithValue }) => {
+    try {
+        // Route: POST /api/signup/skills
+        const response = await fetch(`${API_BASE}/api/signup/skills`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(skillData)
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            return rejectWithValue(errorData.error || 'Failed to save skill');
+        }
+
+        // Returns the created skill (including the new UUID)
+        const savedSkill = await response.json();
+        return savedSkill;
+    } catch (error) {
+        return rejectWithValue(error.message);
+    }
 });
 
-// 3. Fetch LeetCode Stats
-export const fetchLeetCodeStats = createAsyncThunk('user/fetchLeetCode', async (username) => {
-    if (!username) return null;
-    const res = await fetch(`${API_BASE}/api/leetcode/${username}`);
-    if (!res.ok) throw new Error("LeetCode User not found");
-    const data = await res.json();
-    return data; 
+// 3. Delete Skill from Backend
+export const deleteSkillBackend = createAsyncThunk('user/deleteSkillBackend', async (skillId, { rejectWithValue }) => {
+    try {
+        // Route: DELETE /api/signup/skills/:id
+        const response = await fetch(`${API_BASE}/api/signup/skills/${skillId}`, {
+            method: 'DELETE',
+        });
+
+        if (!response.ok) throw new Error('Failed to delete skill');
+
+        return skillId; // Return ID so we can remove it from Redux state
+    } catch (error) {
+        return rejectWithValue(error.message);
+    }
 });
 
-// 4. Update Profile (Text Data)
+// 4. Update Profile Text Data
 export const updateUserProfile = createAsyncThunk('user/update', async ({ userId, data }) => {
+    // Convert camelCase keys to snake_case for the backend
     const payload = {};
     for (const key in data) {
         const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
@@ -111,7 +122,7 @@ export const updateUserProfile = createAsyncThunk('user/update', async ({ userId
     return data;
 });
 
-// 5. Upload Resume (File)
+// 5. Upload Resume File
 export const uploadResumeFile = createAsyncThunk('user/uploadResume', async ({ userId, file }) => {
     const formData = new FormData();
     formData.append('resume', file);
@@ -121,19 +132,14 @@ export const uploadResumeFile = createAsyncThunk('user/uploadResume', async ({ u
     return data.resumeUrl || data.resume_url;
 });
 
-// 6. Upload Profile Image (File)
+// 6. Upload Profile Image
 export const uploadProfileImage = createAsyncThunk('user/uploadProfileImage', async ({ userId, file }) => {
     const formData = new FormData();
-    formData.append('profileImage', file); 
-    
-    const res = await fetch(`${API_BASE}/api/signup/${userId}/profile-image`, { 
-        method: 'PUT', 
-        body: formData 
-    });
-    
+    formData.append('profileImage', file);
+    const res = await fetch(`${API_BASE}/api/signup/${userId}/profile-image`, { method: 'PUT', body: formData });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to upload image");
-    return data.imageUrl; 
+    return data.imageUrl;
 });
 
 // 7. Save Applied Job
@@ -155,31 +161,37 @@ export const saveJob = createAsyncThunk('user/saveJob', async (jobData, { reject
     }
 });
 
-// 8. Add Skill to Backend (NEW)
-// In src/redux/userSlice.js
-
-export const addSkillToBackend = createAsyncThunk('user/addSkillToBackend', async (skillData, { rejectWithValue }) => {
-    try {
-        // CHANGED URL: /api/skills -> /api/signup/skills
-        const response = await fetch(`${API_BASE}/api/signup/skills`, { 
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(skillData)
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            return rejectWithValue(errorData.error || 'Failed to save skill');
-        }
-        
-        const savedSkill = await response.json();
-        return savedSkill; 
-    } catch (error) {
-        return rejectWithValue(error.message);
-    }
+// 8. Fetch GitHub Repos
+export const fetchGithubRepos = createAsyncThunk('user/fetchGithub', async (username) => {
+    if (!username) return [];
+    const res = await fetch(`https://api.github.com/users/${username}/repos?sort=updated&per_page=5`);
+    if (!res.ok) throw new Error("GitHub User not found");
+    const repos = await res.json();
+    return repos
+        .filter((repo) => typeof repo.description === 'string' && repo.description.trim().length > 0)
+        .map((repo) => ({
+            source: 'github',
+            id: repo.id,
+            title: repo.name,
+            link: repo.html_url,
+            description: repo.description.trim(),
+            tags: repo.language || "Code",
+        }));
 });
 
-// --- SLICE DEFINITION ---
+// 9. Fetch LeetCode Stats
+export const fetchLeetCodeStats = createAsyncThunk('user/fetchLeetCode', async (username) => {
+    if (!username) return null;
+    const res = await fetch(`${API_BASE}/api/leetcode/${username}`);
+    if (!res.ok) throw new Error("LeetCode User not found");
+    const data = await res.json();
+    return data;
+});
+
+
+// ==========================================
+//  SLICE DEFINITION
+// ==========================================
 
 const userSlice = createSlice({
     name: 'user',
@@ -191,12 +203,12 @@ const userSlice = createSlice({
             githubUsername: '', linkedinUrl: '', mobileNumber: '',
             leetcodeUrl: '', hackerrankUrl: '', codechefUrl: '', codeforcesUrl: ''
         },
-        status: 'idle',
+        status: 'idle', // For fetching user data
+        skillStatus: 'idle', // For adding/deleting skills
         githubStatus: 'idle',
         leetcodeStatus: 'idle',
         saveJobStatus: 'idle',
-        skillStatus: 'idle', // NEW status for skills
-        error: null
+        error: null,
     },
     reducers: {
         logout: (state) => {
@@ -204,24 +216,16 @@ const userSlice = createSlice({
             state.data = {};
             state.status = 'idle';
         },
-        // We keep this purely for local UI updates if needed, but 'addSkillToBackend' is preferred
-        addSkill: (state, action) => {
-            const exists = state.data.skills.some(s => s.name.toLowerCase() === action.payload.name.toLowerCase());
-            if (!exists) state.data.skills.push(action.payload);
-        },
-        deleteSkill: (state, action) => {
-            state.data.skills = state.data.skills.filter((_, i) => i !== action.payload);
-        },
+        // Synchronous reducers for immediate UI updates
         updateLocalPhoto: (state, action) => {
             state.data.photoDataUrl = action.payload;
         },
         addAppliedJob: (state, action) => {
             const isDuplicate = state.data.appliedJobs.some(job => job.job_url === action.payload.job_url);
-            if (!isDuplicate) {
-                state.data.appliedJobs.push(action.payload);
-            }
+            if (!isDuplicate) state.data.appliedJobs.push(action.payload);
         },
         addManualProject: (state, action) => {
+            // Adds to local state. Note: Requires backend implementation to persist.
             state.data.manualProjects.unshift({ ...action.payload, source: 'manual' });
         },
         removeManualProject: (state, action) => {
@@ -240,23 +244,24 @@ const userSlice = createSlice({
                 state.data = { ...state.data, ...action.payload };
             })
 
-            // 2. Fetch GitHub
-            .addCase(fetchGithubRepos.pending, (state) => { state.githubStatus = 'loading'; })
-            .addCase(fetchGithubRepos.fulfilled, (state, action) => {
-                state.githubStatus = 'succeeded';
-                state.data.githubProjects = action.payload;
+            // 2. Add Skill (Async Backend Sync)
+            .addCase(addSkillToBackend.pending, (state) => { state.skillStatus = 'loading'; })
+            .addCase(addSkillToBackend.fulfilled, (state, action) => {
+                state.skillStatus = 'succeeded';
+                state.data.skills.push(action.payload); // Add the backend-confirmed skill
             })
-            .addCase(fetchGithubRepos.rejected, (state) => { state.githubStatus = 'failed'; })
-
-            // 3. Fetch LeetCode
-            .addCase(fetchLeetCodeStats.pending, (state) => { state.leetcodeStatus = 'loading'; })
-            .addCase(fetchLeetCodeStats.fulfilled, (state, action) => {
-                state.leetcodeStatus = 'succeeded';
-                state.data.leetcodeStats = action.payload;
+            .addCase(addSkillToBackend.rejected, (state, action) => {
+                state.skillStatus = 'failed';
+                state.error = action.payload;
             })
-            .addCase(fetchLeetCodeStats.rejected, (state) => { state.leetcodeStatus = 'failed'; })
 
-            // 4. Update Profile
+            // 3. Delete Skill (Async Backend Sync)
+            .addCase(deleteSkillBackend.fulfilled, (state, action) => {
+                // Remove skill by ID
+                state.data.skills = state.data.skills.filter(s => s.id !== action.payload);
+            })
+
+            // 4. Update Profile Text
             .addCase(updateUserProfile.fulfilled, (state, action) => {
                 state.data = { ...state.data, ...action.payload };
             })
@@ -272,44 +277,36 @@ const userSlice = createSlice({
             })
 
             // 7. Save Job
-            .addCase(saveJob.pending, (state) => {
-                state.saveJobStatus = 'loading';
-                state.error = null;
-            })
+            .addCase(saveJob.pending, (state) => { state.saveJobStatus = 'loading'; })
             .addCase(saveJob.fulfilled, (state, action) => {
                 state.saveJobStatus = 'succeeded';
                 const isDuplicate = state.data.appliedJobs.some(job => job.job_url === action.payload.job_url);
-                if (!isDuplicate) {
-                    state.data.appliedJobs.push(action.payload);
-                }
+                if (!isDuplicate) state.data.appliedJobs.push(action.payload);
             })
             .addCase(saveJob.rejected, (state, action) => {
                 state.saveJobStatus = 'failed';
-                state.error = action.payload || "Failed to save job.";
+                state.error = action.payload;
             })
 
-            // 8. Add Skill to Backend (NEW HANDLERS)
-            .addCase(addSkillToBackend.pending, (state) => {
-                state.skillStatus = 'loading';
-                state.error = null;
+            // 8. External APIs (Github/LeetCode)
+            .addCase(fetchGithubRepos.pending, (state) => { state.githubStatus = 'loading'; })
+            .addCase(fetchGithubRepos.fulfilled, (state, action) => {
+                state.githubStatus = 'succeeded';
+                state.data.githubProjects = action.payload;
             })
-            .addCase(addSkillToBackend.fulfilled, (state, action) => {
-                state.skillStatus = 'succeeded';
-                // Add the new skill returned by the backend (which includes the UUID)
-                // Use a check to prevent duplicates if needed, though UUIDs usually prevent this
-                state.data.skills.push(action.payload);
+            .addCase(fetchGithubRepos.rejected, (state) => { state.githubStatus = 'failed'; })
+
+            .addCase(fetchLeetCodeStats.pending, (state) => { state.leetcodeStatus = 'loading'; })
+            .addCase(fetchLeetCodeStats.fulfilled, (state, action) => {
+                state.leetcodeStatus = 'succeeded';
+                state.data.leetcodeStats = action.payload;
             })
-            .addCase(addSkillToBackend.rejected, (state, action) => {
-                state.skillStatus = 'failed';
-                state.error = action.payload || "Failed to save skill";
-            });
+            .addCase(fetchLeetCodeStats.rejected, (state) => { state.leetcodeStatus = 'failed'; });
     }
 });
 
 export const {
     logout,
-    addSkill,
-    deleteSkill,
     updateLocalPhoto,
     addAppliedJob,
     addManualProject,

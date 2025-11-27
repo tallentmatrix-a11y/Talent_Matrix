@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { 
-  addSkillToBackend, // <--- CHANGED: Import the new Thunk
-  deleteSkill, 
-  updateSemester, 
+  addSkillToBackend,    // Async Add
+  deleteSkillBackend,   // Async Delete (Critical for DB Sync)
+  fetchUserData,        // Critical for Page Refreshes
+  fetchGithubRepos, 
+  fetchLeetCodeStats,
   addManualProject, 
   removeManualProject, 
-  fetchGithubRepos, 
-  fetchLeetCodeStats 
+  updateSemester 
 } from '../redux/userSlice';
 
 const Home = () => {
@@ -16,8 +17,7 @@ const Home = () => {
   // Redux Selectors
   const user = useSelector((state) => state.user.data);
   const githubStatus = useSelector((state) => state.user.githubStatus);
-  const leetcodeStatus = useSelector((state) => state.user.leetcodeStatus);
-  const skillStatus = useSelector((state) => state.user.skillStatus); // <--- Optional: Track saving status
+  const skillStatus = useSelector((state) => state.user.skillStatus); // Track saving/loading
 
   // Local Inputs
   const [skillInput, setSkillInput] = useState('');
@@ -27,38 +27,11 @@ const Home = () => {
   const [semInput, setSemInput] = useState({ name: '', grade: '' });
   const [projInput, setProjInput] = useState({ title: '', desc: '', link: '', tags: '' });
 
-  // 1. Fetch GitHub Projects
-  useEffect(() => {
-    if (user.githubUsername && (!user.githubProjects || user.githubProjects.length === 0)) {
-        dispatch(fetchGithubRepos(user.githubUsername));
-    }
-  }, [user.githubUsername, user.githubProjects, dispatch]);
-
-  // 2. Fetch LeetCode Stats
-  useEffect(() => {
-    if (user.leetcodeUrl && !user.leetcodeStats) {
-      let username = user.leetcodeUrl;
-      
-      // Auto-extract username if full URL is pasted
-      if (username.includes("leetcode.com")) {
-        const cleanUrl = username.replace(/\/+$/, ""); 
-        const parts = cleanUrl.split('/');
-        username = parts[parts.length - 1]; 
-      }
-
-      if (username) {
-        dispatch(fetchLeetCodeStats(username));
-      }
-    }
-  }, [user.leetcodeUrl, user.leetcodeStats, dispatch]);
-
-  const computeCgpa = () => {
-    const vals = Object.values(user.semesters || {}).map(v => parseFloat(v)).filter(v => !isNaN(v));
-    return vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2) : 'N/A';
-  };
+  // --- HELPERS (Handle DB snake_case vs Redux camelCase) ---
+  const getSkillName = (s) => s.skill_name || s.name || '';
+  const getSkillLevel = (s) => s.proficiency || s.level || 'Beginner';
 
   const skillLevelColor = (level) => {
-    // Normalizing case just to be safe
     const safeLevel = (level || '').toLowerCase();
     if (safeLevel === 'beginner') return 'bg-amber-500';
     if (safeLevel === 'intermediate') return 'bg-blue-600';
@@ -72,35 +45,70 @@ const Home = () => {
     return { label: 'Beginner', color: 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/30' };
   };
 
-  // --- UPDATED HANDLER ---
+  const computeCgpa = () => {
+    const vals = Object.values(user.semesters || {}).map(v => parseFloat(v)).filter(v => !isNaN(v));
+    return vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2) : 'N/A';
+  };
+
+  // --- EFFECTS ---
+
+  // 1. Data Safety: Reload user data if ID exists but details are missing (Fixes Refresh)
+  useEffect(() => {
+    const userId = localStorage.getItem('userId') || user.id;
+    if (userId && (!user.skills || user.skills.length === 0)) {
+        dispatch(fetchUserData(userId));
+    }
+  }, [dispatch, user.id, user.skills]);
+
+  // 2. Fetch GitHub Projects
+  useEffect(() => {
+    if (user.githubUsername && (!user.githubProjects || user.githubProjects.length === 0)) {
+        dispatch(fetchGithubRepos(user.githubUsername));
+    }
+  }, [user.githubUsername, user.githubProjects, dispatch]);
+
+  // 3. Fetch LeetCode Stats
+  useEffect(() => {
+    if (user.leetcodeUrl && !user.leetcodeStats) {
+      let username = user.leetcodeUrl;
+      // Auto-extract username if full URL is pasted
+      if (username.includes("leetcode.com")) {
+        const cleanUrl = username.replace(/\/+$/, ""); 
+        const parts = cleanUrl.split('/');
+        username = parts[parts.length - 1]; 
+      }
+      if (username) {
+        dispatch(fetchLeetCodeStats(username));
+      }
+    }
+  }, [user.leetcodeUrl, user.leetcodeStats, dispatch]);
+
+  // --- HANDLERS ---
+
   const handleAddSkill = (e) => {
     e.preventDefault();
     if(!skillInput) return;
 
     // Structure matching your SQL Database
     const newSkillData = { 
-        student_id: user.id, // Sends the User UUID to backend
+        student_id: user.id, 
         skill_name: skillInput, 
         proficiency: skillLevel, 
         tags: skillTags 
     };
 
-    // Dispatch the Thunk to save to DB
     dispatch(addSkillToBackend(newSkillData));
-    
-    // Reset Inputs
     setSkillInput(''); 
     setSkillTags('');
   };
 
-  // Helper to handle both DB keys (snake_case) and Redux keys (camelCase)
-  // This prevents the UI from breaking if data comes from different sources
-  const getSkillName = (s) => s.skill_name || s.name;
-  const getSkillLevel = (s) => s.proficiency || s.level;
-
-  const filteredSkills = (user?.skills || []).filter((s) => 
-    (getSkillName(s) || '').toLowerCase().includes(skillSearch.toLowerCase())
-  );
+  const handleDeleteSkill = (skillId) => {
+    if(skillId) {
+        dispatch(deleteSkillBackend(skillId));
+    } else {
+        console.warn("Cannot delete skill: ID missing. Try refreshing the page.");
+    }
+  };
 
   const handleAddProject = (e) => {
     e.preventDefault();
@@ -114,6 +122,12 @@ const Home = () => {
     setProjInput({ title: '', desc: '', link: '', tags: '' });
   };
 
+  // Filter Skills
+  const filteredSkills = (user?.skills || []).filter((s) => 
+    getSkillName(s).toLowerCase().includes(skillSearch.toLowerCase())
+  );
+
+  // Combine Projects
   const allProjects = [
     ...(user.manualProjects || []), 
     ...(user.githubProjects || [])
@@ -123,7 +137,7 @@ const Home = () => {
     <div className="transition-colors duration-300">
       <h2 className="text-3xl font-bold mb-8 text-gray-900 dark:text-white">Profile</h2>
 
-      {/* Header */}
+      {/* --- HEADER SECTION --- */}
       <div className="flex flex-col md:flex-row gap-6 items-start mb-8">
         <div className="w-[200px] flex-shrink-0 mx-auto md:mx-0">
           <img
@@ -148,7 +162,7 @@ const Home = () => {
         </div>
       </div>
 
-      {/* Contact Links */}
+      {/* --- CONTACT LINKS --- */}
       <div className="bg-white dark:bg-slate-800 p-6 rounded-lg shadow-sm mb-6 border border-gray-200 dark:border-slate-700 transition-colors">
         <h3 className="font-bold text-xl mb-4 text-gray-900 dark:text-white">Contact & Links</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
@@ -164,7 +178,7 @@ const Home = () => {
         </div>
       </div>
 
-      {/* Coding Profiles */}
+      {/* --- CODING PROFILES (Grid Layout) --- */}
       <div className="bg-white dark:bg-slate-800 p-6 rounded-lg shadow-sm mb-6 border border-gray-200 dark:border-slate-700 transition-colors">
         <h3 className="font-bold text-xl mb-4 text-gray-900 dark:text-white">Coding Profiles</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -198,7 +212,7 @@ const Home = () => {
         </div>
       </div>
 
-      {/* --- LEETCODE INSIGHTS SECTION --- */}
+      {/* --- LEETCODE INSIGHTS (Visualization) --- */}
       {user.leetcodeStats && (
         <div className="bg-white dark:bg-slate-800 p-6 rounded-lg shadow-sm mb-6 border border-gray-200 dark:border-slate-700 animate-fade-in transition-colors">
             <div className="flex justify-between items-center mb-6">
@@ -273,7 +287,7 @@ const Home = () => {
         </div>
       )}
 
-      {/* Semesters */}
+      {/* --- SEMESTERS --- */}
       <div className="bg-white dark:bg-slate-800 p-6 rounded-lg shadow-sm mb-6 border border-gray-200 dark:border-slate-700 transition-colors">
         <h3 className="font-bold text-xl mb-4 text-gray-900 dark:text-white">Semester Grades</h3>
         <div className="flex gap-3 flex-wrap mb-4">
@@ -308,7 +322,7 @@ const Home = () => {
         </ul>
       </div>
 
-      {/* Skills */}
+      {/* --- SKILLS --- */}
       <div className="bg-white dark:bg-slate-800 p-6 rounded-lg shadow-sm mb-6 border border-gray-200 dark:border-slate-700 transition-colors">
         <div className="mb-4">
           <h3 className="font-bold text-xl mb-2 text-gray-900 dark:text-white">Skills</h3>
@@ -358,20 +372,15 @@ const Home = () => {
 
         <ul className="list-none space-y-2">
           {filteredSkills.map((skill, idx) => (
-            <li key={idx} className="flex justify-between items-center p-3 rounded-md bg-gray-50 dark:bg-slate-700/50 border border-gray-200 dark:border-slate-600 transition-colors">
+            <li key={skill.id || idx} className="flex justify-between items-center p-3 rounded-md bg-gray-50 dark:bg-slate-700/50 border border-gray-200 dark:border-slate-600 transition-colors">
               <div className="flex items-center gap-2">
-                {/* Updated to read 'proficiency' OR 'level' */}
                 <span className={`w-3 h-3 rounded-full ${skillLevelColor(getSkillLevel(skill))}`}></span>
-                
-                {/* Updated to read 'skill_name' OR 'name' */}
                 <span className="font-semibold text-gray-800 dark:text-white">{getSkillName(skill)}</span>
-                
                 <span className="text-gray-600 dark:text-gray-400 text-sm">({getSkillLevel(skill)})</span>
-                
                 {skill.tags && <span className="text-xs text-gray-500 dark:text-gray-500 ml-2">{skill.tags}</span>}
               </div>
               <button 
-                onClick={() => dispatch(deleteSkill(idx))} 
+                onClick={() => handleDeleteSkill(skill.id)} 
                 className="bg-red-500 hover:bg-red-600 dark:bg-red-600 dark:hover:bg-red-500 text-white px-3 py-1.5 rounded-md text-sm font-medium transition-colors"
               >
                 Delete
@@ -381,7 +390,7 @@ const Home = () => {
         </ul>
       </div>
 
-      {/* Projects */}
+      {/* --- PROJECTS --- */}
       <div className="bg-white dark:bg-slate-800 p-6 rounded-lg shadow-sm mb-6 border border-gray-200 dark:border-slate-700 transition-colors">
         <div className="flex justify-between items-center mb-4">
           <h3 className="font-bold text-xl text-gray-900 dark:text-white">Projects</h3>
@@ -392,6 +401,7 @@ const Home = () => {
           )}
         </div>
 
+        {/* Manual Project Form */}
         <form onSubmit={handleAddProject} className="flex flex-col gap-3 mb-6 bg-gray-50 dark:bg-slate-700/30 p-4 rounded-lg border border-gray-200 dark:border-slate-700 transition-colors">
           <h4 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase">Add Manual Project</h4>
           <div className="flex gap-3">
@@ -434,6 +444,7 @@ const Home = () => {
           </button>
         </form>
 
+        {/* Project List */}
         <div className="flex flex-col gap-3">
           {githubStatus === 'loading' && <div className="text-center py-2 text-gray-500 dark:text-gray-400">Loading GitHub Repos...</div>}
           {allProjects.length === 0 && <div className="text-center text-gray-400 dark:text-gray-500 py-4">No projects found. Add one manually or link GitHub.</div>}
