@@ -10,11 +10,12 @@ async function parseJsonSafe(res) {
 
 /* ===================== THUNKS ===================== */
 
-/** Fetch user profile + semesters + skills + manual projects */
+/** 1) Fetch user profile + semesters + skills + manual projects */
 export const fetchUserData = createAsyncThunk(
   'user/fetchUserData',
   async (userId, { rejectWithValue }) => {
     try {
+      if (!userId) throw new Error('Missing userId');
       const res = await fetch(`${API_BASE}/api/signup/${userId}`);
       if (!res.ok) {
         const err = await parseJsonSafe(res);
@@ -24,23 +25,26 @@ export const fetchUserData = createAsyncThunk(
 
       const semesters = {};
       for (let i = 1; i <= 8; i++) {
-        if (data[`gpa_sem_${i}`] !== undefined && data[`gpa_sem_${i}`] !== null) {
-          semesters[`Semester ${i}`] = data[`gpa_sem_${i}`];
+        const key = `gpa_sem_${i}`;
+        if (data[key] !== undefined && data[key] !== null && data[key] !== '') {
+          semesters[`Semester ${i}`] = data[key];
         }
       }
 
+      // skills
       let skills = [];
       try {
         const sres = await fetch(`${API_BASE}/api/signup/${userId}/skills`);
         if (sres.ok) skills = await sres.json();
       } catch (e) { /* ignore */ }
 
+      // manual projects
       let manualProjects = [];
       try {
         const pres = await fetch(`${API_BASE}/api/projects/${userId}`);
         if (pres.ok) {
           const projData = await pres.json();
-          manualProjects = projData.map(p => ({ ...p, source: 'manual' }));
+          manualProjects = (projData || []).map(p => ({ ...p, source: 'manual' }));
         }
       } catch (e) { /* ignore */ }
 
@@ -71,7 +75,7 @@ export const fetchUserData = createAsyncThunk(
   }
 );
 
-/** Add skill */
+/** 2) SKILL CRUD */
 export const addSkillToBackend = createAsyncThunk(
   'user/addSkillToBackend',
   async (skillData, { rejectWithValue }) => {
@@ -85,15 +89,13 @@ export const addSkillToBackend = createAsyncThunk(
         const err = await parseJsonSafe(res);
         return rejectWithValue(err?.error || `Failed to save skill (${res.status})`);
       }
-      const saved = await res.json();
-      return saved;
+      return await res.json();
     } catch (err) {
       return rejectWithValue(err.message);
     }
   }
 );
 
-/** Delete skill */
 export const deleteSkillBackend = createAsyncThunk(
   'user/deleteSkillBackend',
   async (skillId, { rejectWithValue }) => {
@@ -110,7 +112,7 @@ export const deleteSkillBackend = createAsyncThunk(
   }
 );
 
-/** Add project */
+/** 3) PROJECT CRUD */
 export const addProjectToBackend = createAsyncThunk(
   'user/addProjectToBackend',
   async (projectData, { rejectWithValue }) => {
@@ -132,7 +134,6 @@ export const addProjectToBackend = createAsyncThunk(
   }
 );
 
-/** Delete project */
 export const deleteProjectFromBackend = createAsyncThunk(
   'user/deleteProjectFromBackend',
   async (projectId, { rejectWithValue }) => {
@@ -149,7 +150,7 @@ export const deleteProjectFromBackend = createAsyncThunk(
   }
 );
 
-/** Update user profile (name, links, mobile, etc.) */
+/** 4) UPDATE PROFILE TEXT */
 export const updateUserProfile = createAsyncThunk(
   'user/updateUserProfile',
   async ({ userId, data }, { rejectWithValue }) => {
@@ -159,19 +160,16 @@ export const updateUserProfile = createAsyncThunk(
         const snake = key.replace(/[A-Z]/g, m => `_${m.toLowerCase()}`);
         payload[snake] = data[key];
       }
-
       const res = await fetch(`${API_BASE}/api/signup/${userId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-
       if (!res.ok) {
         const err = await parseJsonSafe(res);
         return rejectWithValue(err?.error || `Update failed (${res.status})`);
       }
-
-      // We return the original camelCase data so reducer can merge.
+      // return original camelCase data so UI reducer can merge
       return data;
     } catch (err) {
       return rejectWithValue(err.message);
@@ -179,7 +177,7 @@ export const updateUserProfile = createAsyncThunk(
   }
 );
 
-/** Upload resume (PUT) */
+/** 5) FILE UPLOADS */
 export const uploadResumeFile = createAsyncThunk(
   'user/uploadResumeFile',
   async ({ userId, file }, { rejectWithValue }) => {
@@ -196,7 +194,6 @@ export const uploadResumeFile = createAsyncThunk(
   }
 );
 
-/** Upload profile image */
 export const uploadProfileImage = createAsyncThunk(
   'user/uploadProfileImage',
   async ({ userId, file }, { rejectWithValue }) => {
@@ -213,7 +210,7 @@ export const uploadProfileImage = createAsyncThunk(
   }
 );
 
-/** Save applied job */
+/** 6) JOB SAVE */
 export const saveJob = createAsyncThunk(
   'user/saveJob',
   async (jobData, { rejectWithValue }) => {
@@ -234,20 +231,18 @@ export const saveJob = createAsyncThunk(
   }
 );
 
-/** GitHub fetch
-    -> changed to filter out repos without a non-empty description
-    -> increased per_page to 50 to provide more results (optional)
-*/
+/** 7) GITHUB REPOS (external) */
 export const fetchGithubRepos = createAsyncThunk(
   'user/fetchGithubRepos',
   async (username, { rejectWithValue }) => {
     if (!username) return [];
     try {
-      const res = await fetch(`https://api.github.com/users/${username}/repos?sort=updated&per_page=50`);
+      const res = await fetch(`https://api.github.com/users/${username}/repos?sort=updated&per_page=20`);
       if (!res.ok) return [];
       const repos = await res.json();
-      return repos
-        .filter(r => r && r.name && r.description && r.description.trim()) // only keep repos with description
+      // normalize
+      return (repos || [])
+        .filter(r => r && r.name)
         .map(r => ({
           id: r.id,
           title: r.name,
@@ -262,7 +257,7 @@ export const fetchGithubRepos = createAsyncThunk(
   }
 );
 
-/** LeetCode fetch (backend endpoint) */
+/** 8) LeetCode fetch (backend endpoint) - normalized */
 export const fetchLeetCodeStats = createAsyncThunk(
   'user/fetchLeetCodeStats',
   async (usernameOrUrl, { rejectWithValue }) => {
@@ -274,13 +269,91 @@ export const fetchLeetCodeStats = createAsyncThunk(
       }
       username = (username || '').trim();
       if (!username) return null;
+
       const res = await fetch(`${API_BASE}/api/leetcode/${username}`);
       if (!res.ok) {
         const err = await parseJsonSafe(res);
         throw new Error(err?.error || `LeetCode fetch failed (${res.status})`);
       }
-      const data = await res.json();
-      return data;
+      const raw = await res.json();
+
+      const normalized = {
+        total: 0,
+        easy: 0,
+        medium: 0,
+        hard: 0,
+        topics: []
+      };
+
+      normalized.total =
+        raw?.totalSolved ??
+        raw?.total ??
+        raw?.total_solved ??
+        raw?.totalSolvedQuestions ??
+        raw?.total_problems_solved ??
+        raw?.total_solved_questions ??
+        0;
+
+      normalized.easy =
+        raw?.easy ??
+        raw?.easySolved ??
+        raw?.easy_count ??
+        raw?.easy_solved ??
+        0;
+
+      normalized.medium =
+        raw?.medium ??
+        raw?.mediumSolved ??
+        raw?.medium_count ??
+        raw?.medium_solved ??
+        0;
+
+      normalized.hard =
+        raw?.hard ??
+        raw?.hardSolved ??
+        raw?.hard_count ??
+        raw?.hard_solved ??
+        0;
+
+      // topics
+      if (Array.isArray(raw?.topics) && raw.topics.length > 0) {
+        normalized.topics = raw.topics.map(t => ({
+          topicName: t.topicName ?? t.name ?? t.topic ?? t.key ?? 'Unknown',
+          solved: Number(t.solved ?? t.solvedCount ?? t.count ?? t.total ?? 0)
+        }));
+      } else if (raw?.topics_map && typeof raw.topics_map === 'object') {
+        normalized.topics = Object.entries(raw.topics_map).map(([k, v]) => ({ topicName: k, solved: Number(v) || 0 }));
+      } else if (Array.isArray(raw?.topicStats) && raw.topicStats.length > 0) {
+        normalized.topics = raw.topicStats.map(t => ({ topicName: t.name ?? t.topic ?? 'Unknown', solved: Number(t.solved ?? t.count ?? 0) }));
+      } else if (raw?.topicsSolved && typeof raw.topicsSolved === 'object') {
+        normalized.topics = Object.entries(raw.topicsSolved).map(([k, v]) => ({ topicName: k, solved: Number(v) || 0 }));
+      } else {
+        // try to discover topic-like arrays in response
+        const maybe = [];
+        for (const k of Object.keys(raw || {})) {
+          const val = raw[k];
+          if (Array.isArray(val)) {
+            val.forEach(item => {
+              if (item && typeof item === 'object') {
+                const name = item.topicName ?? item.name ?? item.title ?? item.key;
+                const solved = item.solved ?? item.count ?? item.total ?? item.questionsSolved;
+                if (name && (solved !== undefined)) maybe.push({ topicName: name, solved: Number(solved) || 0 });
+              }
+            });
+          }
+        }
+        if (maybe.length) normalized.topics = maybe.slice(0, 50);
+      }
+
+      normalized.total = Number(normalized.total) || 0;
+      normalized.easy = Number(normalized.easy) || 0;
+      normalized.medium = Number(normalized.medium) || 0;
+      normalized.hard = Number(normalized.hard) || 0;
+      if (!normalized.total && (normalized.easy || normalized.medium || normalized.hard)) {
+        normalized.total = normalized.easy + normalized.medium + normalized.hard;
+      }
+
+      return normalized;
     } catch (err) {
       return rejectWithValue(err.message);
     }
@@ -330,12 +403,12 @@ const userSlice = createSlice({
       state.status = 'idle';
     },
     addSkill(state, action) {
-      if (!state.data.skills) state.data.skills = [];
+      state.data.skills = state.data.skills || [];
       state.data.skills.push(action.payload);
     },
     updateSemester(state, action) {
       const { name, grade } = action.payload || {};
-      if (!state.data.semesters) state.data.semesters = {};
+      state.data.semesters = state.data.semesters || {};
       if (name) state.data.semesters[name] = parseFloat(grade);
     },
     updateLocalPhoto(state, action) {
@@ -344,6 +417,7 @@ const userSlice = createSlice({
     addAppliedJobLocal(state, action) {
       const job = action.payload;
       if (!job) return;
+      state.data.appliedJobs = state.data.appliedJobs || [];
       const exists = state.data.appliedJobs.some(j => j.job_url === job.job_url);
       if (!exists) state.data.appliedJobs.push(job);
     }
@@ -357,22 +431,36 @@ const userSlice = createSlice({
 
       // add skill
       .addCase(addSkillToBackend.pending, state => { state.skillStatus = 'loading'; state.error = null; })
-      .addCase(addSkillToBackend.fulfilled, (state, action) => { state.skillStatus = 'succeeded'; state.data.skills = state.data.skills || []; state.data.skills.push(action.payload); })
+      .addCase(addSkillToBackend.fulfilled, (state, action) => {
+        state.skillStatus = 'succeeded';
+        state.data.skills = state.data.skills || [];
+        state.data.skills.push(action.payload);
+      })
       .addCase(addSkillToBackend.rejected, (state, action) => { state.skillStatus = 'failed'; state.error = action.payload || action.error?.message; })
 
       // delete skill
       .addCase(deleteSkillBackend.pending, state => { state.skillStatus = 'loading'; })
-      .addCase(deleteSkillBackend.fulfilled, (state, action) => { state.skillStatus = 'succeeded'; state.data.skills = (state.data.skills || []).filter(s => s.id !== action.payload); })
+      .addCase(deleteSkillBackend.fulfilled, (state, action) => {
+        state.skillStatus = 'succeeded';
+        state.data.skills = (state.data.skills || []).filter(s => s.id !== action.payload);
+      })
       .addCase(deleteSkillBackend.rejected, (state, action) => { state.skillStatus = 'failed'; state.error = action.payload || action.error?.message; })
 
       // add project
       .addCase(addProjectToBackend.pending, state => { state.projectStatus = 'loading'; })
-      .addCase(addProjectToBackend.fulfilled, (state, action) => { state.projectStatus = 'succeeded'; state.data.manualProjects = state.data.manualProjects || []; state.data.manualProjects.unshift(action.payload); })
+      .addCase(addProjectToBackend.fulfilled, (state, action) => {
+        state.projectStatus = 'succeeded';
+        state.data.manualProjects = state.data.manualProjects || [];
+        state.data.manualProjects.unshift(action.payload);
+      })
       .addCase(addProjectToBackend.rejected, (state, action) => { state.projectStatus = 'failed'; state.error = action.payload || action.error?.message; })
 
       // delete project
       .addCase(deleteProjectFromBackend.pending, state => { state.projectStatus = 'loading'; })
-      .addCase(deleteProjectFromBackend.fulfilled, (state, action) => { state.projectStatus = 'succeeded'; state.data.manualProjects = (state.data.manualProjects || []).filter(p => p.id !== action.payload); })
+      .addCase(deleteProjectFromBackend.fulfilled, (state, action) => {
+        state.projectStatus = 'succeeded';
+        state.data.manualProjects = (state.data.manualProjects || []).filter(p => p.id !== action.payload);
+      })
       .addCase(deleteProjectFromBackend.rejected, (state, action) => { state.projectStatus = 'failed'; state.error = action.payload || action.error?.message; })
 
       // update profile
@@ -386,7 +474,12 @@ const userSlice = createSlice({
 
       // save job
       .addCase(saveJob.pending, state => { state.saveJobStatus = 'loading'; })
-      .addCase(saveJob.fulfilled, (state, action) => { state.saveJobStatus = 'succeeded'; const exists = (state.data.appliedJobs || []).some(j => j.job_url === action.payload.job_url); if (!exists) state.data.appliedJobs.push(action.payload); })
+      .addCase(saveJob.fulfilled, (state, action) => {
+        state.saveJobStatus = 'succeeded';
+        state.data.appliedJobs = state.data.appliedJobs || [];
+        const exists = state.data.appliedJobs.some(j => j.job_url === action.payload.job_url);
+        if (!exists) state.data.appliedJobs.push(action.payload);
+      })
       .addCase(saveJob.rejected, (state, action) => { state.saveJobStatus = 'failed'; state.error = action.payload || action.error?.message; })
 
       // github
