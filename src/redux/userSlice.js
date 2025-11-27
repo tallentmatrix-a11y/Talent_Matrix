@@ -234,17 +234,20 @@ export const saveJob = createAsyncThunk(
   }
 );
 
-/** GitHub fetch */
+/** GitHub fetch
+    -> changed to filter out repos without a non-empty description
+    -> increased per_page to 50 to provide more results (optional)
+*/
 export const fetchGithubRepos = createAsyncThunk(
   'user/fetchGithubRepos',
   async (username, { rejectWithValue }) => {
     if (!username) return [];
     try {
-      const res = await fetch(`https://api.github.com/users/${username}/repos?sort=updated&per_page=5`);
+      const res = await fetch(`https://api.github.com/users/${username}/repos?sort=updated&per_page=50`);
       if (!res.ok) return [];
       const repos = await res.json();
       return repos
-        .filter(r => r && r.name)
+        .filter(r => r && r.name && r.description && r.description.trim()) // only keep repos with description
         .map(r => ({
           id: r.id,
           title: r.name,
