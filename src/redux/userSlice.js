@@ -259,7 +259,8 @@ const userSlice = createSlice({
             const exists = state.data.appliedJobs.some(j => j.job_url === action.payload.job_url);
             if (!exists) state.data.appliedJobs.push(action.payload);
         },
-        updateSemesterLocal: (state, action) => {
+        // Renamed this to 'updateSemester' to match Home.jsx import
+        updateSemester: (state, action) => {
             const { name, grade } = action.payload;
             state.data.semesters[name] = parseFloat(grade);
         }
@@ -342,11 +343,12 @@ const userSlice = createSlice({
     }
 });
 
+// Ensure updateSemester is exported here!
 export const {
     logout,
     updateLocalPhoto,
     addAppliedJobLocal,
-    updateSemesterLocal
+    updateSemester
 } = userSlice.actions;
 
 export default userSlice.reducer;

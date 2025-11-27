@@ -17,10 +17,8 @@ const Home = () => {
   // Redux selectors
   const user = useSelector((state) => state.user.data);
   const githubStatus = useSelector((state) => state.user.githubStatus);
-  const leetcodeStatus = useSelector((state) => state.user.leetcodeStatus);
   const skillStatus = useSelector((state) => state.user.skillStatus);
   const projectStatus = useSelector((state) => state.user.projectStatus);
-  const saveJobStatus = useSelector((state) => state.user.saveJobStatus); // optional
 
   // Local inputs
   const [skillInput, setSkillInput] = useState('');
@@ -30,7 +28,7 @@ const Home = () => {
   const [semInput, setSemInput] = useState({ name: '', grade: '' });
   const [projInput, setProjInput] = useState({ title: '', desc: '', link: '', tags: '' });
 
-  // Helpers for backward-compatible DB shapes
+  // Helpers
   const getSkillName = (s) => s.skill_name || s.name || '';
   const getSkillLevel = (s) => s.proficiency || s.level || 'Beginner';
 
@@ -54,7 +52,6 @@ const Home = () => {
   };
 
   // Effects
-  // 1. Initial load (fix refresh issue)
   useEffect(() => {
     const userId = localStorage.getItem('userId') || user.id;
     if (userId && (!user.skills || user.skills.length === 0)) {
@@ -62,14 +59,12 @@ const Home = () => {
     }
   }, [dispatch, user.id, user.skills]);
 
-  // 2. Fetch GitHub repos
   useEffect(() => {
     if (user.githubUsername && (!user.githubProjects || user.githubProjects.length === 0)) {
       dispatch(fetchGithubRepos(user.githubUsername));
     }
   }, [dispatch, user.githubUsername, user.githubProjects]);
 
-  // 3. Fetch LeetCode stats (support URL or username)
   useEffect(() => {
     if (user.leetcodeUrl && !user.leetcodeStats) {
       let username = user.leetcodeUrl;
@@ -99,11 +94,7 @@ const Home = () => {
   };
 
   const handleDeleteSkill = (skillId) => {
-    if (!skillId) {
-      console.warn('Cannot delete skill: ID missing. Try refreshing the page.');
-      return;
-    }
-    dispatch(deleteSkillBackend(skillId));
+    if (skillId) dispatch(deleteSkillBackend(skillId));
   };
 
   const handleAddProject = (e) => {
@@ -118,20 +109,15 @@ const Home = () => {
       tags: projInput.tags
     };
 
-    // Use backend thunk so DB and Redux stay in sync
     dispatch(addProjectToBackend(newProjectData));
     setProjInput({ title: '', desc: '', link: '', tags: '' });
   };
 
   const handleDeleteProject = (projectId) => {
-    if (!projectId) {
-      console.warn('Cannot delete project: ID missing.');
-      return;
-    }
-    dispatch(deleteProjectFromBackend(projectId));
+    if (projectId) dispatch(deleteProjectFromBackend(projectId));
   };
 
-  // Filters + aggregate
+  // Filters
   const filteredSkills = (user?.skills || []).filter((s) =>
     getSkillName(s).toLowerCase().includes(skillSearch.toLowerCase())
   );
@@ -224,7 +210,7 @@ const Home = () => {
         </div>
       </div>
 
-      {/* LeetCode insights */}
+      {/* LeetCode Insights */}
       {user.leetcodeStats && (
         <div className="bg-white dark:bg-slate-800 p-6 rounded-lg shadow-sm mb-6 border border-gray-200 dark:border-slate-700 animate-fade-in transition-colors">
           <div className="flex justify-between items-center mb-6">
@@ -460,8 +446,6 @@ const Home = () => {
         {/* Project list */}
         <div className="flex flex-col gap-3">
           {githubStatus === 'loading' && <div className="text-center py-2 text-gray-500 dark:text-gray-400">Loading GitHub Repos...</div>}
-
-          {allProjects.length === 0 && <div className="text-center text-gray-400 dark:text-gray-500 py-4">No projects found. Add one manually or link GitHub.</div>}
 
           {allProjects.map((project, idx) => (
             <div key={project.id || idx} className={`p-4 rounded-md border transition-colors ${project.source === 'github' ? 'bg-slate-50 dark:bg-slate-700/50 border-slate-300 dark:border-slate-600' : 'bg-white dark:bg-slate-800 border-gray-200 dark:border-slate-600'}`}>
