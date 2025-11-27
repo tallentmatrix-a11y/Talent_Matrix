@@ -76,7 +76,7 @@ const Books = () => {
     // Only fetch if we don't already have books
     if (books.length === 0) fetchBooks(defaultQuery);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userSkills, fetchBooks]); 
+  }, [userSkills, fetchBooks]);
 
   // Search handlers
   const handleManualSearch = () => {
@@ -85,20 +85,27 @@ const Books = () => {
   };
   const handleKeyDown = (e) => { if (e.key === 'Enter') handleManualSearch(); };
 
-  // --- UPDATED DOWNLOAD HANDLER ---
+  // --- UPDATED DOWNLOAD HANDLER (With Cache Busting) ---
   const handleDownload = () => {
     if (!selectedBook?.download) return;
 
     let downloadUrl = selectedBook.download;
 
-    // Check if URL is relative (doesn't start with http/https)
-    // If so, prepend the API_BASE to create a valid absolute URL
+    // 1. Fix Relative URLs (prepend API_BASE)
+    // This ensures we point to YOUR backend (talentmatrix-backend), not the frontend URL
     if (!downloadUrl.startsWith('http')) {
-      const cleanBase = API_BASE.replace(/\/$/, ""); // Remove trailing slash if present
+      const cleanBase = API_BASE.replace(/\/$/, ""); 
       const cleanPath = downloadUrl.startsWith("/") ? downloadUrl : `/${downloadUrl}`;
       downloadUrl = `${cleanBase}${cleanPath}`;
     }
 
+    // 2. CACHE BUSTER: Add a random timestamp
+    // This forces the browser to think it's a new link, bypassing the old cache
+    // and ensuring the backend runs the new scraper logic.
+    const separator = downloadUrl.includes('?') ? '&' : '?';
+    downloadUrl = `${downloadUrl}${separator}nocache=${Date.now()}`;
+
+    // 3. Trigger Download
     const link = document.createElement('a');
     link.href = downloadUrl;
     link.target = '_blank';
@@ -107,7 +114,7 @@ const Books = () => {
     link.click();
     document.body.removeChild(link);
   };
-  // --------------------------------
+  // ---------------------------------------------------
 
   // Reset to a default topic
   const handleReset = () => {
