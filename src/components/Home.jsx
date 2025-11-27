@@ -1,15 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { 
-  addSkill, deleteSkill, updateSemester, addManualProject, removeManualProject, 
-  fetchGithubRepos, fetchLeetCodeStats 
+  addSkillToBackend, // <--- CHANGED: Import the new Thunk
+  deleteSkill, 
+  updateSemester, 
+  addManualProject, 
+  removeManualProject, 
+  fetchGithubRepos, 
+  fetchLeetCodeStats 
 } from '../redux/userSlice';
 
 const Home = () => {
   const dispatch = useDispatch();
+  
+  // Redux Selectors
   const user = useSelector((state) => state.user.data);
   const githubStatus = useSelector((state) => state.user.githubStatus);
   const leetcodeStatus = useSelector((state) => state.user.leetcodeStatus);
+  const skillStatus = useSelector((state) => state.user.skillStatus); // <--- Optional: Track saving status
 
   // Local Inputs
   const [skillInput, setSkillInput] = useState('');
@@ -26,11 +34,12 @@ const Home = () => {
     }
   }, [user.githubUsername, user.githubProjects, dispatch]);
 
-  // 2. Fetch LeetCode Stats (Auto-extract username from URL)
+  // 2. Fetch LeetCode Stats
   useEffect(() => {
     if (user.leetcodeUrl && !user.leetcodeStats) {
       let username = user.leetcodeUrl;
       
+      // Auto-extract username if full URL is pasted
       if (username.includes("leetcode.com")) {
         const cleanUrl = username.replace(/\/+$/, ""); 
         const parts = cleanUrl.split('/');
@@ -49,12 +58,12 @@ const Home = () => {
   };
 
   const skillLevelColor = (level) => {
-    switch (level) {
-      case 'Beginner': return 'bg-amber-500';
-      case 'Intermediate': return 'bg-blue-600';
-      case 'Expert': return 'bg-emerald-500';
-      default: return 'bg-gray-400';
-    }
+    // Normalizing case just to be safe
+    const safeLevel = (level || '').toLowerCase();
+    if (safeLevel === 'beginner') return 'bg-amber-500';
+    if (safeLevel === 'intermediate') return 'bg-blue-600';
+    if (safeLevel === 'expert') return 'bg-emerald-500';
+    return 'bg-gray-400';
   };
 
   const getLeetCodeLevel = (solvedCount) => {
@@ -63,14 +72,35 @@ const Home = () => {
     return { label: 'Beginner', color: 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/30' };
   };
 
+  // --- UPDATED HANDLER ---
   const handleAddSkill = (e) => {
     e.preventDefault();
     if(!skillInput) return;
-    dispatch(addSkill({ name: skillInput, level: skillLevel, tags: skillTags }));
-    setSkillInput(''); setSkillTags('');
+
+    // Structure matching your SQL Database
+    const newSkillData = { 
+        student_id: user.id, // Sends the User UUID to backend
+        skill_name: skillInput, 
+        proficiency: skillLevel, 
+        tags: skillTags 
+    };
+
+    // Dispatch the Thunk to save to DB
+    dispatch(addSkillToBackend(newSkillData));
+    
+    // Reset Inputs
+    setSkillInput(''); 
+    setSkillTags('');
   };
 
-  const filteredSkills = (user?.skills || []).filter((s) => s.name.toLowerCase().includes(skillSearch.toLowerCase()));
+  // Helper to handle both DB keys (snake_case) and Redux keys (camelCase)
+  // This prevents the UI from breaking if data comes from different sources
+  const getSkillName = (s) => s.skill_name || s.name;
+  const getSkillLevel = (s) => s.proficiency || s.level;
+
+  const filteredSkills = (user?.skills || []).filter((s) => 
+    (getSkillName(s) || '').toLowerCase().includes(skillSearch.toLowerCase())
+  );
 
   const handleAddProject = (e) => {
     e.preventDefault();
@@ -134,7 +164,7 @@ const Home = () => {
         </div>
       </div>
 
-      {/* Coding Profiles (Links) */}
+      {/* Coding Profiles */}
       <div className="bg-white dark:bg-slate-800 p-6 rounded-lg shadow-sm mb-6 border border-gray-200 dark:border-slate-700 transition-colors">
         <h3 className="font-bold text-xl mb-4 text-gray-900 dark:text-white">Coding Profiles</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -290,6 +320,8 @@ const Home = () => {
             className="w-full px-3 py-2 rounded-md border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-600 transition-colors" 
           />
         </div>
+        
+        {/* ADD SKILL FORM */}
         <form onSubmit={handleAddSkill} className="flex gap-3 flex-wrap mb-4">
           <input 
             type="text" 
@@ -317,18 +349,25 @@ const Home = () => {
           />
           <button 
             type="submit" 
-            className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500 text-white rounded-md font-semibold transition-colors"
+            disabled={skillStatus === 'loading'}
+            className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500 text-white rounded-md font-semibold transition-colors disabled:opacity-50"
           >
-            Add
+            {skillStatus === 'loading' ? 'Saving...' : 'Add'}
           </button>
         </form>
+
         <ul className="list-none space-y-2">
           {filteredSkills.map((skill, idx) => (
             <li key={idx} className="flex justify-between items-center p-3 rounded-md bg-gray-50 dark:bg-slate-700/50 border border-gray-200 dark:border-slate-600 transition-colors">
               <div className="flex items-center gap-2">
-                <span className={`w-3 h-3 rounded-full ${skillLevelColor(skill.level)}`}></span>
-                <span className="font-semibold text-gray-800 dark:text-white">{skill.name}</span>
-                <span className="text-gray-600 dark:text-gray-400 text-sm">({skill.level})</span>
+                {/* Updated to read 'proficiency' OR 'level' */}
+                <span className={`w-3 h-3 rounded-full ${skillLevelColor(getSkillLevel(skill))}`}></span>
+                
+                {/* Updated to read 'skill_name' OR 'name' */}
+                <span className="font-semibold text-gray-800 dark:text-white">{getSkillName(skill)}</span>
+                
+                <span className="text-gray-600 dark:text-gray-400 text-sm">({getSkillLevel(skill)})</span>
+                
                 {skill.tags && <span className="text-xs text-gray-500 dark:text-gray-500 ml-2">{skill.tags}</span>}
               </div>
               <button 

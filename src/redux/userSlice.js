@@ -26,12 +26,29 @@ export const fetchUserData = createAsyncThunk('user/fetchData', async (userId) =
         }
     } catch (e) { console.error(e); }
 
+    // Fetch Skills (Assuming backend returns them, or initialize empty)
+    // If your backend endpoint for user data includes skills, map them here.
+    // Otherwise, we default to empty array or fetch them separately if needed.
+    // Based on previous context, we'll assume they might be separate or included.
+    // For now, initializing as empty array or using what's in data.
+    
+    // Note: You might need a separate fetch for skills if /signup/:id doesn't return them.
+    // For this example, let's assume we need to fetch them or they are part of data.
+    // If you need a separate fetch, let me know. I'll initialize it here.
+    let skills = [];
+    try {
+         const skillRes = await fetch(`${API_BASE}/api/skills/${userId}`);
+         if(skillRes.ok) {
+             skills = await skillRes.json();
+         }
+    } catch (e) { console.error("Skills fetch warning", e); }
+
     return {
         id: data.id,
         name: data.full_name,
         email: data.email,
         rollNumber: data.roll_number || '',
-        photoDataUrl: data.profile_image_url || '', // Maps backend URL to frontend state
+        photoDataUrl: data.profile_image_url || '', 
         resumeRemoteUrl: data.resume_url || '',
         semesters,
         mobileNumber: data.mobile_number || '',
@@ -41,7 +58,7 @@ export const fetchUserData = createAsyncThunk('user/fetchData', async (userId) =
         hackerrankUrl: data.hackerrank_url || '',
         codechefUrl: data.codechef_url || '',
         codeforcesUrl: data.codeforces_url || '',
-        skills: [],
+        skills: skills, // Populated from backend
         appliedJobs: [],
         manualProjects,
         leetcodeStats: null,
@@ -80,7 +97,6 @@ export const fetchLeetCodeStats = createAsyncThunk('user/fetchLeetCode', async (
 export const updateUserProfile = createAsyncThunk('user/update', async ({ userId, data }) => {
     const payload = {};
     for (const key in data) {
-        // Convert camelCase keys to snake_case for DB
         const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
         payload[snakeKey] = data[key];
     }
@@ -105,10 +121,10 @@ export const uploadResumeFile = createAsyncThunk('user/uploadResume', async ({ u
     return data.resumeUrl || data.resume_url;
 });
 
-// 6. Upload Profile Image (File) - NEW FEATURE
+// 6. Upload Profile Image (File)
 export const uploadProfileImage = createAsyncThunk('user/uploadProfileImage', async ({ userId, file }) => {
     const formData = new FormData();
-    formData.append('profileImage', file); // Must match backend: upload.single('profileImage')
+    formData.append('profileImage', file); 
     
     const res = await fetch(`${API_BASE}/api/signup/${userId}/profile-image`, { 
         method: 'PUT', 
@@ -117,7 +133,7 @@ export const uploadProfileImage = createAsyncThunk('user/uploadProfileImage', as
     
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to upload image");
-    return data.imageUrl; // Backend returns { imageUrl: "..." }
+    return data.imageUrl; 
 });
 
 // 7. Save Applied Job
@@ -139,6 +155,30 @@ export const saveJob = createAsyncThunk('user/saveJob', async (jobData, { reject
     }
 });
 
+// 8. Add Skill to Backend (NEW)
+// In src/redux/userSlice.js
+
+export const addSkillToBackend = createAsyncThunk('user/addSkillToBackend', async (skillData, { rejectWithValue }) => {
+    try {
+        // CHANGED URL: /api/skills -> /api/signup/skills
+        const response = await fetch(`${API_BASE}/api/signup/skills`, { 
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(skillData)
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            return rejectWithValue(errorData.error || 'Failed to save skill');
+        }
+        
+        const savedSkill = await response.json();
+        return savedSkill; 
+    } catch (error) {
+        return rejectWithValue(error.message);
+    }
+});
+
 // --- SLICE DEFINITION ---
 
 const userSlice = createSlice({
@@ -155,6 +195,7 @@ const userSlice = createSlice({
         githubStatus: 'idle',
         leetcodeStatus: 'idle',
         saveJobStatus: 'idle',
+        skillStatus: 'idle', // NEW status for skills
         error: null
     },
     reducers: {
@@ -163,6 +204,7 @@ const userSlice = createSlice({
             state.data = {};
             state.status = 'idle';
         },
+        // We keep this purely for local UI updates if needed, but 'addSkillToBackend' is preferred
         addSkill: (state, action) => {
             const exists = state.data.skills.some(s => s.name.toLowerCase() === action.payload.name.toLowerCase());
             if (!exists) state.data.skills.push(action.payload);
@@ -224,9 +266,8 @@ const userSlice = createSlice({
                 state.data.resumeRemoteUrl = action.payload;
             })
 
-            // 6. Upload Profile Image (Handle Success)
+            // 6. Upload Profile Image
             .addCase(uploadProfileImage.fulfilled, (state, action) => {
-                // Update the photo URL in the store immediately after upload
                 state.data.photoDataUrl = action.payload;
             })
 
@@ -245,6 +286,22 @@ const userSlice = createSlice({
             .addCase(saveJob.rejected, (state, action) => {
                 state.saveJobStatus = 'failed';
                 state.error = action.payload || "Failed to save job.";
+            })
+
+            // 8. Add Skill to Backend (NEW HANDLERS)
+            .addCase(addSkillToBackend.pending, (state) => {
+                state.skillStatus = 'loading';
+                state.error = null;
+            })
+            .addCase(addSkillToBackend.fulfilled, (state, action) => {
+                state.skillStatus = 'succeeded';
+                // Add the new skill returned by the backend (which includes the UUID)
+                // Use a check to prevent duplicates if needed, though UUIDs usually prevent this
+                state.data.skills.push(action.payload);
+            })
+            .addCase(addSkillToBackend.rejected, (state, action) => {
+                state.skillStatus = 'failed';
+                state.error = action.payload || "Failed to save skill";
             });
     }
 });
